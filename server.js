@@ -5,46 +5,56 @@ import { WebSocketServer } from 'ws';
 
 const PORT=Number(process.env.PORT||3000),MAX_PLAYERS=4,TICK=30;
 const WORLD={width:1000,height:1000,cx:500,cy:500,radius:430};
-const MODULE_COUNT=6,MODULE_RADIUS=70,MODULE_HP=70,CORE_HP=80;
 const rooms=new Map();
 const id=()=>crypto.randomBytes(4).toString('hex');
 const code=()=>{let c;do c=Math.random().toString(36).slice(2,8).toUpperCase();while(rooms.has(c));return c};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const send=(ws,d)=>{if(ws.readyState===1)ws.send(JSON.stringify(d))};
-const makeBoss=()=>({x:500,y:300,hp:MODULE_COUNT*MODULE_HP+CORE_HP,maxHp:MODULE_COUNT*MODULE_HP+CORE_HP,angle:0,shotTimer:45,coreHp:CORE_HP,modules:Array(MODULE_COUNT).fill(MODULE_HP)});
-const syncBossHp=b=>{b.hp=b.coreHp+b.modules.reduce((s,v)=>s+Math.max(0,v),0)};
 const playersView=r=>r.players.map((p,i)=>({id:p.id,name:p.name,x:p.x,y:p.y,hp:p.hp,score:p.score,color:p.color,host:i===0}));
 const roomInfo=r=>({type:'room',code:r.code,count:r.players.length,max:MAX_PLAYERS,phase:r.phase,hostId:r.players[0]?.id||null,players:playersView(r)});
 const snapshot=r=>({type:'state',phase:r.phase,hostId:r.players[0]?.id||null,players:playersView(r),boss:r.boss,bullets:r.bullets});
 const broadcast=(r,d)=>r.players.forEach(p=>send(p.ws,d));
-function createRoom(){const c=code();const r={code:c,players:[],phase:'waiting',bullets:[],boss:makeBoss()};rooms.set(c,r);return r}
-function reset(r){r.phase='playing';r.bullets=[];r.boss=makeBoss();r.players.forEach((p,i)=>{const a=-Math.PI/2+i*Math.PI/2;p.x=500+Math.cos(a)*300;p.y=500+Math.sin(a)*300;p.hp=100;p.score=0;p.cooldown=0})}
+
+function makeBoss(){
+ const add=(id,x,y,kind,hp)=>({id,x,y,kind,hp,maxHp:hp,alive:true,shotTimer:35+Math.floor(Math.random()*25)});
+ return {x:500,y:300,angle:0,modules:[
+  add('core',0,0,'core',120),
+  add('top',0,-86,'armor',65),add('bottom',0,86,'armor',65),
+  add('left',-86,0,'cannon',75),add('right',86,0,'cannon',75),
+  add('tl',-62,-62,'cannon',60),add('tr',62,-62,'cannon',60),
+  add('bl',-62,62,'armor',60),add('br',62,62,'armor',60)
+ ]};
+}
+function syncBoss(b){b.maxHp=b.modules.reduce((n,m)=>n+m.maxHp,0);b.hp=b.modules.reduce((n,m)=>n+Math.max(0,m.hp),0)}
+function createRoom(){const c=code();const r={code:c,players:[],phase:'waiting',bullets:[],boss:makeBoss()};syncBoss(r.boss);rooms.set(c,r);return r}
+function reset(r){r.phase='playing';r.bullets=[];r.boss=makeBoss();syncBoss(r.boss);r.players.forEach((p,i)=>{const a=-Math.PI/2+i*Math.PI/2;p.x=500+Math.cos(a)*300;p.y=500+Math.sin(a)*300;p.hp=100;p.score=0;p.cooldown=0})}
 function insideArena(x,y){return Math.hypot(x-500,y-500)<=405}
 function fire(r,p){if(r.phase!=='playing'||p.cooldown>0||p.hp<=0)return;p.cooldown=6;const dx=r.boss.x-p.x,dy=r.boss.y-p.y,l=Math.hypot(dx,dy)||1;r.bullets.push({id:id(),owner:p.id,x:p.x,y:p.y,vx:dx/l*15,vy:dy/l*15,life:100,enemy:false})}
-function bossFire(r){const live=r.players.filter(p=>p.hp>0);if(!live.length)return;for(const target of live){const dx=target.x-r.boss.x,dy=target.y-r.boss.y,l=Math.hypot(dx,dy)||1;r.bullets.push({id:id(),owner:'boss',x:r.boss.x,y:r.boss.y,vx:dx/l*4.8,vy:dy/l*4.8,life:190,enemy:true})}}
-function damageBoss(r,b){const boss=r.boss;const rx=b.x-boss.x,ry=b.y-boss.y;
-  const coreDistance=Math.hypot(rx,ry);
-  if(coreDistance<38&&boss.coreHp>0){boss.coreHp=Math.max(0,boss.coreHp-5);syncBossHp(boss);return true}
-  const moduleDistance=70;
-  for(let i=0;i<MODULE_COUNT;i++){
-    if(boss.modules[i]<=0)continue;
-    const a=i*Math.PI/3;
-    const mx=Math.cos(a)*moduleDistance,my=Math.sin(a)*moduleDistance;
-    if(Math.hypot(rx-mx,ry-my)<30){boss.modules[i]=Math.max(0,boss.modules[i]-5);syncBossHp(boss);return true}
-  }
-  return false
-}
+function bossFire(r,m){const live=r.players.filter(p=>p.hp>0);if(!live.length||!m.alive||m.kind!=='cannon')return;const target=live[Math.floor(Math.random()*live.length)],sx=r.boss.x+m.x,sy=r.boss.y+m.y,dx=target.x-sx,dy=target.y-sy,l=Math.hypot(dx,dy)||1;r.bullets.push({id:id(),owner:'boss:'+m.id,x:sx,y:sy,vx:dx/l*4.8,vy:dy/l*4.8,life:190,enemy:true,module:m.id})}
+function hitModule(r,b){let hit=null,best=Infinity;for(const m of r.boss.modules){if(!m.alive)continue;const d=Math.hypot(b.x-(r.boss.x+m.x),b.y-(r.boss.y+m.y));if(d<31&&d<best){best=d;hit=m}}if(!hit)return false;hit.hp=Math.max(0,hit.hp-5);if(hit.hp===0)hit.alive=false;const p=r.players.find(p=>p.id===b.owner);if(p)p.score+=5;return true}
 setInterval(()=>{for(const r of rooms.values()){
  if(r.phase==='playing'){
-  r.boss.angle+=.025;r.boss.x=500+Math.cos(r.boss.angle)*120;r.boss.y=300+Math.sin(r.boss.angle)*45;r.boss.shotTimer--;if(r.boss.shotTimer<=0){bossFire(r);r.boss.shotTimer=65}
+  r.boss.angle+=.025;r.boss.x=500+Math.cos(r.boss.angle)*120;r.boss.y=300+Math.sin(r.boss.angle)*45;
+  for(const m of r.boss.modules){if(m.alive&&m.kind==='cannon'){m.shotTimer--;if(m.shotTimer<=0){bossFire(r,m);m.shotTimer=55+Math.floor(Math.random()*30)}}}
   for(const p of r.players){p.x+=p.input.x*7;p.y+=p.input.y*7;const dx=p.x-500,dy=p.y-500,d=Math.hypot(dx,dy),max=390;if(d>max){const k=max/d;p.x=500+dx*k;p.y=500+dy*k}if(p.cooldown>0)p.cooldown--}
-  const next=[];
-  for(const b of r.bullets){b.x+=b.vx;b.y+=b.vy;b.life--;if(b.life<=0||!insideArena(b.x,b.y))continue;if(!b.enemy&&damageBoss(r,b)){const p=r.players.find(x=>x.id===b.owner);if(p)p.score+=5;continue}if(b.enemy){const p=r.players.find(x=>x.hp>0&&Math.hypot(b.x-x.x,b.y-x.y)<23);if(p){p.hp=Math.max(0,p.hp-10);continue}}next.push(b)}r.bullets=next;
-  if(r.boss.hp<=0)r.phase='won';else if(r.players.length&&r.players.every(p=>p.hp<=0))r.phase='lost';
+  const next=[];for(const b of r.bullets){b.x+=b.vx;b.y+=b.vy;b.life--;if(b.life<=0||!insideArena(b.x,b.y))continue;if(!b.enemy&&hitModule(r,b))continue;if(b.enemy){const p=r.players.find(p=>p.hp>0&&Math.hypot(b.x-p.x,b.y-p.y)<23);if(p){p.hp=Math.max(0,p.hp-10);continue}}next.push(b)}r.bullets=next;
+  syncBoss(r.boss);const core=r.boss.modules.find(m=>m.id==='core');if(!core.alive)r.phase='won';else if(r.players.length&&r.players.every(p=>p.hp<=0))r.phase='lost';
  }
  broadcast(r,snapshot(r));
 }},1000/TICK);
-const server=http.createServer(async(req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,rooms:rooms.size}))}if(req.url==='/'||req.url==='/index.html'){try{const html=await readFile(new URL('./public/index.html',import.meta.url),'utf8');res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-cache'});return res.end(html)}catch{res.writeHead(500);return res.end('Client unavailable')}}res.writeHead(404);res.end('Not found')});
+
+const server=http.createServer(async(req,res)=>{
+ if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,rooms:rooms.size}))}
+ if(req.url==='/'||req.url==='/index.html'){
+  try{
+   let html=await readFile(new URL('./public/index.html',import.meta.url),'utf8');
+   const draw=`function draw(){const scale=canvas.width/world.width;ctx.setTransform(scale,0,0,scale,0,0);ctx.clearRect(0,0,world.width,world.height);ctx.fillStyle='#02040b';ctx.fillRect(0,0,1000,1000);ctx.save();ctx.beginPath();ctx.arc(500,500,430,0,Math.PI*2);ctx.clip();const g=ctx.createRadialGradient(500,500,30,500,500,430);g.addColorStop(0,'#151f42');g.addColorStop(1,'#040714');ctx.fillStyle=g;ctx.fillRect(70,70,860,860);for(let i=0;i<100;i++){ctx.fillStyle=i%4?'#ffffff33':'#8bb7ff55';ctx.fillRect((i*97)%860+70,(i*53)%860+70,2,2)}ctx.strokeStyle='#263a6b';ctx.lineWidth=2;ctx.beginPath();ctx.arc(500,500,300,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.arc(500,500,185,0,Math.PI*2);ctx.stroke();ctx.restore();const b=state.boss,t=performance.now();ctx.save();ctx.translate(b.x,b.y);ctx.rotate(t/1800);for(const m of b.modules||[]){const s=m.id==='core'?58:50;ctx.save();ctx.translate(m.x,m.y);ctx.fillStyle=!m.alive?'#111722':m.kind==='core'?'#d92f4f':m.kind==='cannon'?'#d88716':'#405878';ctx.strokeStyle=!m.alive?'#293247':m.kind==='core'?'#ffd9df':'#b6c6e8';ctx.lineWidth=5;ctx.fillRect(-s/2,-s/2,s,s);ctx.strokeRect(-s/2,-s/2,s,s);if(m.kind==='core'&&m.alive){ctx.fillStyle='#fff';ctx.fillRect(-10,-10,20,20)}if(m.kind==='cannon'&&m.alive){ctx.fillStyle='#151a25';ctx.fillRect(-7,-28,14,28);ctx.fillStyle='#ffe98a';ctx.fillRect(-4,-35,8,8)}if(m.alive&&m.hp<m.maxHp){ctx.fillStyle='#080b12';ctx.fillRect(-s/2,-s/2-10,s,5);ctx.fillStyle='#51e38a';ctx.fillRect(-s/2,-s/2-10,s*(m.hp/m.maxHp),5)}ctx.restore()}ctx.restore();for(const p of state.players){ctx.save();ctx.translate(p.x,p.y);ctx.fillStyle=p.color;ctx.beginPath();ctx.moveTo(0,-17);ctx.lineTo(13,12);ctx.lineTo(0,7);ctx.lineTo(-13,12);ctx.closePath();ctx.fill();ctx.strokeStyle='#fff';ctx.stroke();ctx.restore()}for(const b of state.bullets){ctx.fillStyle=b.enemy?'#ff4d7d':'#fff';ctx.beginPath();ctx.arc(b.x,b.y,b.enemy?5:4,0,Math.PI*2);ctx.fill()}requestAnimationFrame(draw)}`;
+   html=html.replace(/function draw\(\)\{[\s\S]*?requestAnimationFrame\(draw\)/,draw);
+   res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-cache'});return res.end(html)
+  }catch{res.writeHead(500);return res.end('Client unavailable')}
+ }
+ res.writeHead(404);res.end('Not found')
+});
 const wss=new WebSocketServer({server});
 wss.on('connection',ws=>{const p={id:id(),ws,room:null,name:'Pilot',x:500,y:800,hp:100,score:0,color:'#63d8ff',cooldown:0,input:{x:0,y:0}};send(ws,{type:'hello',id:p.id,maxPlayers:MAX_PLAYERS,world:WORLD});ws.on('message',raw=>{let m;try{m=JSON.parse(raw.toString())}catch{return};if(m.type==='create'){if(!p.room)join(createRoom(),p,m.name);return}if(m.type==='join'){if(p.room)return;const r=rooms.get(String(m.code||'').toUpperCase());if(!r)return send(ws,{type:'error',message:'Комната не найдена'});if(r.players.length>=MAX_PLAYERS)return send(ws,{type:'error',message:'Комната заполнена'});if(r.phase!=='waiting')return send(ws,{type:'error',message:'Игра уже началась'});join(r,p,m.name);return}if(!p.room)return;if(m.type==='input'){p.input.x=clamp(Number(m.x)||0,-1,1);p.input.y=clamp(Number(m.y)||0,-1,1)}else if(m.type==='fire')fire(p.room,p);else if(m.type==='start'&&p.room.players[0]===p&&p.room.phase==='waiting'){reset(p.room);broadcast(p.room,roomInfo(p.room))}else if(m.type==='restart'&&p.room.players[0]===p&&p.room.phase!=='playing'){reset(p.room);broadcast(p.room,roomInfo(p.room))}});ws.on('close',()=>{if(!p.room)return;const r=p.room;r.players=r.players.filter(x=>x!==p);if(!r.players.length)rooms.delete(r.code);else broadcast(r,roomInfo(r))})});
 function join(r,p,name){p.room=r;p.name=String(name||'Pilot').slice(0,16);p.color=['#63d8ff','#b58cff','#ff6b9a','#ffd166'][r.players.length];r.players.push(p);send(p.ws,{type:'joined',code:r.code,playerId:p.id,hostId:r.players[0].id,phase:r.phase,players:playersView(r)});broadcast(r,roomInfo(r))}
