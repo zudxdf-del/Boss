@@ -70,13 +70,13 @@ wss.on('connection', ws => {
     try { m = JSON.parse(raw.toString()); } catch { return; }
     if (m.type === 'ping') return send(ws, { type: 'pong', t: m.t });
     if (m.type === 'create') {
-      if (p.room) return;
+      if (p.room) return send(ws, { type: 'error', message: 'Вы уже в комнате.' });
       const r = makeRoom();
       join(r, p, m.name);
       return;
     }
     if (m.type === 'join') {
-      if (p.room) return;
+      if (p.room) return send(ws, { type: 'error', message: 'Вы уже в комнате.' });
       const r = rooms.get(String(m.code || '').trim().toUpperCase());
       if (!r) return send(ws, { type: 'error', message: 'Комната не найдена.' });
       if (r.phase !== 'lobby') return send(ws, { type: 'error', message: 'Игра уже началась.' });
@@ -89,9 +89,12 @@ wss.on('connection', ws => {
     if (m.type === 'input') {
       p.input.x = clamp(Number(m.x) || 0, -1, 1);
       p.input.y = clamp(Number(m.y) || 0, -1, 1);
-    } else if (m.type === 'start' && r.players[0] === p && r.phase === 'lobby') {
+    } else if (m.type === 'start') {
+      if (r.players[0] !== p) return send(ws, { type: 'error', message: 'Только хост может начать игру.' });
+      if (r.phase !== 'lobby') return;
       reset(r);
       broadcast(r, info(r));
+      broadcast(r, { type: 'state', phase: r.phase, code: r.code, players: view(r), shots: r.shots, stars: r.stars });
     } else if (m.type === 'fire' && r.phase === 'playing' && p.cooldown <= 0 && p.hp > 0) {
       const target = r.players.find(x => x !== p && x.hp > 0);
       if (target) {
@@ -116,8 +119,9 @@ wss.on('connection', ws => {
     player.x = 600;
     player.y = 400;
     r.players.push(player);
-    send(ws, { type: 'joined', playerId: player.id, ...info(r) });
-    broadcast(r, info(r));
+    const roomInfo = info(r);
+    send(ws, { type: 'joined', playerId: player.id, isHost: r.players[0] === player, ...roomInfo });
+    broadcast(r, roomInfo);
   }
 });
 
