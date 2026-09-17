@@ -90,7 +90,6 @@ wss.on('connection', ws => {
       p.input.x = clamp(Number(m.x) || 0, -1, 1);
       p.input.y = clamp(Number(m.y) || 0, -1, 1);
     } else if (m.type === 'start') {
-      if (r.players[0] !== p) return send(ws, { type: 'error', message: 'Только хост может начать игру.' });
       if (r.phase !== 'lobby') return;
       reset(r);
       broadcast(r, info(r));
