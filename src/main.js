@@ -21,9 +21,9 @@ const projectiles=[];
 const warnings=[];
 let running=false,ended=false,last=performance.now();
 
-function reset(){projectiles.length=0;warnings.length=0;arena.reset(renderer.w,renderer.h);player.reset(renderer.w,renderer.h);boss.reset(renderer.w,renderer.h);ended=false;running=true;menu.classList.add('hidden');start.textContent='НАЧАТЬ БОЙ';last=performance.now();}
+function reset(){projectiles.length=0;warnings.length=0;arena.reset(renderer.w,renderer.h);player.reset(renderer.w,renderer.h,arena);boss.reset(renderer.w,renderer.h);ended=false;running=true;menu.classList.add('hidden');start.textContent='НАЧАТЬ БОЙ';last=performance.now();}
 start.addEventListener('click',reset);
-addEventListener('resize',()=>{arena.reset(renderer.w,renderer.h);if(!running){player.reset(renderer.w,renderer.h);boss.reset(renderer.w,renderer.h);}});
+addEventListener('resize',()=>{arena.reset(renderer.w,renderer.h);if(!running){player.reset(renderer.w,renderer.h,arena);boss.reset(renderer.w,renderer.h);}});
 
 function autoAim(){let target=null,best=Infinity;for(const m of boss.modules){if(!m.alive)continue;const p=boss.modulePosition(m);const d=(p.x-player.x)**2+(p.y-player.y)**2;if(d<best){best=d;target=p;}}return target||{x:boss.x,y:boss.y};}
 function playerFire(){if(player.cooldown>0)return;const target=input.isTouchDevice?autoAim():input.getAim(player.x,player.y,renderer.w,renderer.h);const dx=target.x-player.x,dy=target.y-player.y,d=Math.hypot(dx,dy)||1;projectiles.push(new Projectile(player.x,player.y,dx/d*720,dy/d*720,'player',player.damage));player.cooldown=player.fireRate;}
@@ -35,4 +35,4 @@ function collisions(){for(let i=projectiles.length-1;i>=0;i--){const p=projectil
 function update(dt){arena.update(dt,renderer.w,renderer.h);player.update(dt,input,arena);boss.update(dt,arena);if(input.pointer.down)playerFire();bossAttack();updateWarnings(dt);for(const p of projectiles)p.update(dt);collisions();if(player.hp<=0||!boss.alive()){ended=true;running=false;menu.classList.remove('hidden');start.textContent=boss.alive()?'ПОВТОРИТЬ БОЙ':'ИГРАТЬ СНОВА';}}
 function render(){renderer.clear();renderer.drawArena(arena);renderer.drawBoss(boss);renderer.drawWarnings(warnings);renderer.drawProjectiles(projectiles);renderer.drawPlayer(player);hud.update(player,boss);if(ended)renderer.drawResult(boss.alive()?'Корабль уничтожен':'Босс уничтожен');}
 function loop(now){const dt=Math.min(.033,(now-last)/1000);last=now;if(running)update(dt);render();requestAnimationFrame(loop)}
-arena.reset(renderer.w,renderer.h);player.reset(renderer.w,renderer.h);boss.reset(renderer.w,renderer.h);requestAnimationFrame(loop);
+arena.reset(renderer.w,renderer.h);player.reset(renderer.w,renderer.h,arena);boss.reset(renderer.w,renderer.h);requestAnimationFrame(loop);
