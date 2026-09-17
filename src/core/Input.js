@@ -2,6 +2,7 @@ export class Input {
   constructor(canvas){
     this.keys=new Set();
     this.pointer={x:0,y:0,down:false};
+    this.isTouchDevice=('ontouchstart' in window)||navigator.maxTouchPoints>0;
     addEventListener('keydown',e=>{this.keys.add(e.key.toLowerCase());if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()))e.preventDefault();});
     addEventListener('keyup',e=>this.keys.delete(e.key.toLowerCase()));
     canvas.addEventListener('pointermove',e=>this.setPointer(e,canvas));
