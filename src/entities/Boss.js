@@ -1,6 +1,6 @@
 export class Boss {
   constructor(){this.radius=132;this.maxHp=2600;this.modules=[];this.reset(0,0);}
-  reset(w,h){this.x=w*.70;this.y=h*.50;this.angle=0;this.fireTimer=.7;this.attackTimer=1.2;this.attackIndex=0;this.phase=1;this.hp=this.maxHp;this.flash=0;this.modules=[
+  reset(w,h,arena=null){this.x=arena?arena.cx+arena.radius*.34:w*.70;this.y=arena?arena.cy:h*.50;this.angle=0;this.fireTimer=.7;this.attackTimer=1.2;this.attackIndex=0;this.phase=1;this.hp=this.maxHp;this.flash=0;this.modules=[
     {id:'armor-top',x:0,y:-92,w:62,h:42,hp:260,maxHp:260,type:'armor',alive:true},
     {id:'armor-bottom',x:0,y:92,w:62,h:42,hp:260,maxHp:260,type:'armor',alive:true},
     {id:'cannon-left',x:-100,y:0,w:48,h:62,hp:300,maxHp:300,type:'cannon',alive:true},
