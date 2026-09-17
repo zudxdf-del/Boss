@@ -1,0 +1,1 @@
+export class HUD { constructor(root){this.root=root;} update(player,boss){this.root.innerHTML=`<div class="title">BOSS</div><div>HP ${Math.ceil(player.hp)} / ${player.maxHp}</div><div>BOSS ${Math.ceil(boss.hp)} / ${boss.maxHp}</div><div class="hint">WASD / arrows • aim with pointer • FIRE</div>`;} }
